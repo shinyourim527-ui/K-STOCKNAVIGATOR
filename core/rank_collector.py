@@ -2,61 +2,98 @@ import FinanceDataReader as fdr
 import schedule
 import time
 import pandas as pd
+import os
 from datetime import datetime
 from supabase import create_client
 
-# 1. Supabase 설정
+# =========================
+# Supabase 설정 (중요)
+# =========================
 URL = "https://pltytmopzljqpajphmzs.supabase.co"
+
+# 🔥 반드시 service_role 키로 변경해야 정상 작동
 KEY = "sb_publishable_qaZch4fDeQ4p23fasx8Mpw_DGwvCOn2"
+
 supabase = create_client(URL, KEY)
 
+
+# =========================
+# 데이터 수집 함수
+# =========================
 def collect_realtime_ranking():
     now = datetime.now()
-    print(f"\n[{now.strftime('%H:%M:%S')}] 📊 실시간 시장 순위 수집 시작...")
 
     try:
-        # 2. KRX 전체 종목 시세 가져오기
         df = fdr.StockListing('KRX')
 
-        # 3. 거래대금(Amount) 순으로 상위 50개 정렬
-        # 컬럼명이 다를 수 있어 안전하게 처리합니다.
-        sort_column = 'Amount' if 'Amount' in df.columns else 'MarCap' 
+        sort_column = 'Amount' if 'Amount' in df.columns else 'MarCap'
         top_50 = df.sort_values(by=sort_column, ascending=False).head(50)
 
+        supabase_data = []
+
         for _, row in top_50.iterrows():
-            # [수정 포인트] 등락률 컬럼명 대응 (Chg, Changes, Rate 중 있는 것을 사용)
-            # 장 마감 후나 데이터가 없을 경우를 대비해 기본값 0.0을 설정합니다.
+
+            # 안전한 등락률 처리
             change_rate = 0.0
             for col in ['Chg', 'Changes', 'Rate']:
                 if col in row and pd.notna(row[col]):
                     change_rate = float(row[col])
                     break
 
-            # 4. 데이터 가공 및 Supabase 업서트
             data = {
                 "id": str(row['Code']),
                 "stock_name": str(row['Name']),
                 "current_price": int(row['Close']) if pd.notna(row['Close']) else 0,
                 "change_rate": change_rate,
-                "trade_value": int(row['Amount']) if 'Amount' in row and pd.notna(row['Amount']) else 0,
+                "trade_value": int(row['Amount']) if pd.notna(row.get('Amount', 0)) else 0,
                 "updated_at": now.isoformat()
             }
 
-            # DB 업데이트
-            supabase.table("stocks").upsert(data).execute()
+            supabase_data.append(data)
 
-        print(f" ✅ 현재 거래대금 상위 50개 종목으로 DB 동기화 완료!")
+        # =========================
+        # 🔥 핵심 개선: bulk upsert
+        # =========================
+        supabase.table("stocks").upsert(supabase_data).execute()
+
+        # =========================
+        # 화면 출력
+        # =========================
+        os.system('cls' if os.name == 'nt' else 'clear')
+
+        print(f"📊 K-STOCK NAVIGATOR | {now.strftime('%H:%M:%S')}")
+        print("=" * 65)
+        print(f"{'순위':<4} | {'종목명':<14} | {'현재가':>10} | {'등락률':>8} | {'거래대금(억)':>10}")
+        print("-" * 65)
+
+        for i, (_, row) in enumerate(top_50.head(10).iterrows(), 1):
+
+            change_rate = 0.0
+            for col in ['Chg', 'Changes', 'Rate']:
+                if col in row and pd.notna(row[col]):
+                    change_rate = float(row[col])
+                    break
+
+            sign = "▲" if change_rate > 0 else "▼" if change_rate < 0 else " "
+            amount_krw = int(row['Amount']) // 100000000 if pd.notna(row.get('Amount', 0)) else 0
+
+            print(f"{i:<5} | {row['Name']:<14} | {int(row['Close']):>10,}원 | {sign}{abs(change_rate):>6.2f}% | {amount_krw:>12,}억")
+
+        print("-" * 65)
+        print("✅ Supabase 동기화 완료")
 
     except Exception as e:
-        print(f" ❌ 순위 수집 중 오류 발생: {e}")
+        print(f"❌ 오류 발생: {e}")
 
-# 1분마다 실행 예약
+
+# =========================
+# 실행 스케줄
+# =========================
 schedule.every(1).minutes.do(collect_realtime_ranking)
 
 if __name__ == "__main__":
-    print("🚀 K-STOCK NAVIGATOR 실시간 로봇 가동 중...")
-    collect_realtime_ranking() # 시작 시 즉시 실행
-    
+    collect_realtime_ranking()
+
     while True:
         schedule.run_pending()
         time.sleep(1)

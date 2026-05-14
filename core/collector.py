@@ -3,8 +3,8 @@ from supabase import create_client
 from datetime import datetime
 
 # Supabase 설정 (유림님의 정보 입력)
-URL = "YOUR_SUPABASE_URL"
-KEY = "YOUR_SUPABASE_KEY"
+URL = "https://pltytmopzljqpajphmzs.supabase.co"
+KEY = "sb_publishable_qaZch4fDeQ4p23fasx8Mpw_DGwvCOn2"
 supabase = create_client(URL, KEY)
 
 # 시장의 상태를 보여줄 핵심 지수 리스트
